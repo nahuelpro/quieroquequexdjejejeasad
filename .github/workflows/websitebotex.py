@@ -1,233 +1,230 @@
-import psutil
+
 import os
 import sys
-os.system("pkill -9 chrome")  # Forcefully kill all Chrome processes
-def kill_chrome():
-    for process in psutil.process_iter(attrs=["pid", "name"]):
-        if "chrome" in process.info["name"].lower():
-            try:
-                p = psutil.Process(process.info["pid"])
-                p.terminate()  # Terminate gracefully
-            except psutil.NoSuchProcess:
-                pass  # Process already closed
+import time
 
-kill_chrome()
-
-#requiredlib = [selenium,time]
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-#from selenium.webdriver.firefox.options import Options
-#from selenium.webdriver.firefox.service import Service
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
-import time
-#import tempfile
-#import uuid
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.common.exceptions import TimeoutException
 
-'''
-os.environ["MOZ_LOG"] = "debug"  # Enable verbose logging
-# Initialize WebDriver
-options = Options()
-service = Service(excecutable_path="/usr/local/bin/geckodriver")
-options.binary_location = '/usr/bin/firefox'
-options.add_argument("--headless")
-driver = webdriver.Firefox(options=options, service=service)
-'''
-# Chrome Options
-options = Options()
-# Use persistent user profile
-USER_DATA_DIR = "/tmp/seedloaf-session"
-options.add_argument(f"--user-data-dir={USER_DATA_DIR}")
-options.add_argument("--profile-directory=Default")  # Optional
 
-options.binary_location = "/opt/chrome/chrome"
-options.add_argument("--headless=new")  # Use new headless mode
-options.add_argument("window-size=1920x1080")  # Ensure full viewport
-options.add_argument("--disable-gpu")  # Fix rendering issues in headless
-options.add_argument("--no-sandbox")
-options.add_argument("--disable-dev-shm-usage")
-#temp_dir = f"/tmp/chrome-user-data-{uuid.uuid4()}"
-#options.add_argument(f"--user-data-dir={temp_dir}")
+# CONFIGURACION
+SERVER_NAME = "yo quiero una papa"
 
-# Bypass detection
-options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-options.add_argument("--disable-blink-features=AutomationControlled")
-options.add_argument("--enable-javascript")
-options.add_argument("--disable-web-security")
-service = Service("/usr/local/bin/chromedriver")  # Path to ChromeDriver
-options.add_argument("--disable-popup-blocking")
-options.add_argument("--disable-features=IsolateOrigins,site-per-process")
-options.add_argument("--disable-extensions")
+LOGIN_URL = "https://accounts.seedloaf.com/sign-in"
 
-# Initialize WebDriver
-driver = webdriver.Chrome(options=options,service=service) 
-driver.get("https://accounts.seedloaf.com/sign-in")
-#driver.maximize_window()
+USERNAME = os.getenv("USERNAME")
+PASSWORD = os.getenv("PASSWORD")
 
-# Wait for page to fully load
-WebDriverWait(driver, 10).until(lambda driver: driver.execute_script("return document.readyState") == "complete")
 
-# Login flow function
-def run_loginflow(usernamesec,passwordsec):
-#---------------------------
+def find_text(driver, text):
+    """Busca un elemento que contenga exactamente el texto indicado."""
+    elements = driver.find_elements(
+        By.XPATH,
+        f"//*[normalize-space(.)='{text}']"
+    )
+
+    for element in elements:
+        if element.is_displayed():
+            return element
+
+    return False
+
+
+def find_world_button(driver, button_text):
+    """Busca un botón Start World o Stop World."""
+    buttons = driver.find_elements(
+        By.XPATH,
+        f"//button[contains(normalize-space(.), '{button_text}')]"
+    )
+
+    for button in buttons:
+        if button.is_displayed() and button.is_enabled():
+            return button
+
+    return False
+
+
+def click_element(driver, element):
+    driver.execute_script(
+        "arguments[0].scrollIntoView({block: 'center'});",
+        element
+    )
+
     try:
-        # Wait for the username field to be visible
-        username = WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.ID, "identifier-field"))
+        element.click()
+    except Exception:
+        driver.execute_script("arguments[0].click();", element)
+
+
+def login(driver, wait):
+
+    if not USERNAME or not PASSWORD:
+        raise RuntimeError("Faltan los Secrets USERNAME o PASSWORD.")
+
+    driver.get(LOGIN_URL)
+
+    # Correo
+    email = wait.until(
+        lambda d: d.find_element(By.ID, "identifier-field")
+        if d.find_elements(By.ID, "identifier-field") else False
+    )
+
+    email.clear()
+    email.send_keys(USERNAME)
+    email.submit()
+
+    print("Correo enviado.")
+
+    # Contraseña
+    password = WebDriverWait(driver, 30).until(
+        lambda d: d.find_element(By.ID, "password-field")
+        if d.find_elements(By.ID, "password-field") else False
+    )
+
+    password.clear()
+    password.send_keys(PASSWORD)
+    password.submit()
+
+    print("Contraseña enviada.")
+
+    # Esperar a que se complete el acceso.
+    try:
+        WebDriverWait(driver, 40).until(
+            lambda d: "accounts.seedloaf.com" not in d.current_url
         )
-        print("After waiting for username:\n"+driver.current_url)
-        
-        driver.execute_script("arguments[0].scrollIntoView(true);", username)
-        driver.execute_script("arguments[0].click();", username)
-        username.send_keys(usernamesec)
-        username.send_keys(Keys.RETURN)
-        
-        # Optional: Wait to observe behavior (debugging)
-        time.sleep(5)
-        print("entered username")
-        ran_loginflow = 1
-    except Exception as e:
-        print(f"Error occurred(username): {e}")
-        print("After waiting for username:\n"+driver.current_url)
-        
-    #---------------------------
-    
+    except TimeoutException:
+        raise RuntimeError(
+            "Seedloaf no terminó el inicio de sesión. "
+            "Puede haber una verificación adicional."
+        )
+
+    print("Inicio de sesión completado.")
+
+
+def open_shared_with_you(driver, wait):
+
+    shared = wait.until(
+        lambda d: find_text(d, "Shared With You")
+    )
+
+    click_element(driver, shared)
+
+    print("Entrando a Shared With You.")
+
+    wait.until(
+        lambda d: find_text(d, SERVER_NAME)
+    )
+
+    print("Servidor encontrado en Shared With You.")
+
+
+def open_server_if_needed(driver, wait):
+
+    # Primero comprobar si los botones ya están disponibles.
+    start = find_world_button(driver, "Start World")
+    stop = find_world_button(driver, "Stop World")
+
+    if not start and not stop:
+
+        # Entrar en el servidor compartido.
+        server = wait.until(
+            lambda d: find_text(d, SERVER_NAME)
+        )
+
+        click_element(driver, server)
+
+        print("Abriendo el servidor compartido.")
+
+        wait.until(
+            lambda d: (
+                find_world_button(d, "Start World")
+                or find_world_button(d, "Stop World")
+            )
+        )
+
+    # Comprobar el estado.
+    stop = find_world_button(driver, "Stop World")
+
+    if stop:
+        print("El servidor ya está encendido.")
+        return
+
+    start = find_world_button(driver, "Start World")
+
+    if not start:
+        raise RuntimeError(
+            "No se encontró Start World ni Stop World."
+        )
+
+    print("Servidor apagado. Solicitando encendido.")
+
+    click_element(driver, start)
+
+    # Esperar confirmación visual del encendido.
     try:
-        try: # Check if username is incorrect
-            wait = WebDriverWait(driver, 5)
-            error_elem = wait.until(EC.visibility_of_element_located((By.ID, "error-identifier")))
-            if error_elem:
-                print("Username is incorrect")
-                driver.quit()
-                sys.exit()  
-        except Exception as e:
+        WebDriverWait(driver, 120).until(
+            lambda d: find_world_button(d, "Stop World")
+        )
+    except TimeoutException:
+        raise RuntimeError(
+            "Se pulsó Start World, pero no apareció Stop World "
+            "después de 120 segundos."
+        )
+
+    print("¡Servidor encendido correctamente!")
+
+
+def main():
+
+    options = Options()
+
+    options.binary_location = "/opt/chrome/chrome"
+
+    options.add_argument("--headless=new")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--window-size=1920,1080")
+
+    options.add_argument("--disable-gpu")
+    options.add_argument("--disable-extensions")
+
+    driver = webdriver.Chrome(
+        options=options,
+        service=Service("/usr/local/bin/chromedriver")
+    )
+
+    try:
+        wait = WebDriverWait(driver, 30)
+
+        login(driver, wait)
+
+        open_shared_with_you(driver, wait)
+
+        open_server_if_needed(driver, wait)
+
+        print("Proceso finalizado correctamente.")
+
+    except Exception as error:
+
+        print(f"ERROR: {type(error).__name__}: {error}")
+        print(f"URL actual: {driver.current_url}")
+
+        # Guardar una captura para diagnosticar el problema.
+        try:
+            driver.save_screenshot("seedloaf_error.png")
+            print("Captura guardada: seedloaf_error.png")
+        except Exception:
             pass
-            
-        # Wait for the password field to be visible
-        wait = WebDriverWait(driver, 15)
-        password = WebDriverWait(driver, 20).until(
-            EC.presence_of_element_located((By.ID, "password-field"))
-        )
-        print("After waiting for password:\n"+driver.current_url)
-        
-        # Now enter password  
-        old_url = driver.current_url
-        driver.execute_script("arguments[0].scrollIntoView(true);", password)
-        driver.execute_script("arguments[0].click();", password)
-        password.send_keys(passwordsec)
-        password.send_keys(Keys.RETURN)
-        # Optional: Wait to observe behavior (debugging)
-        time.sleep(8)
-        print("entered password")
-    except Exception as e:
-        print(f"Error occurred(password): {e}")
-        print("After waiting for password:\n"+driver.current_url)
-    ran_loginflow = 2
+
+        sys.exit(1)
+
+    finally:
+        driver.quit()
 
 
-
-# Cleanup old marker
-MARKER_FILE = "/tmp/seedloaf-session/.valid_session"
-SESSION_DIR = "/tmp/seedloaf-session"
-try:
-    os.remove(MARKER_FILE)
-except FileNotFoundError:
-    pass
-    
-# Check dashboard
-try:
-    WebDriverWait(driver, 10).until(
-        lambda d: "dashboard" in d.current_url
-    )
-    print("✅ Already logged in, at dashboard")
-except:
-    print("🔐 Not logged in — need to re-run login flow:\n"+driver.current_url)
-    try: 
-        ran_loginflow = 0
-        usernamesec = os.getenv("USERNAME")
-        passwordsec = os.getenv("PASSWORD")
-        run_loginflow(usernamesec,passwordsec)
-    except Exception as e:
-        print("something wrong with secrets")
-    # Write that Llogin flow has occured
-    with open(MARKER_FILE, "w") as f:
-        f.write("session valid")
-    
-
-#---------------------------
-try:
-    # Wait for the start button to be visible
-    try:
-        wait = WebDriverWait(driver, 20)
-        startworld = wait.until(EC.element_to_be_clickable((By.CSS_SELECTOR, "button.btn-primary")))
-        print("After waiting for start:\n"+driver.current_url)
-    except:
-        try: # Check if password is incorrect or stop button is already present
-            if  ran_loginflow and driver.current_url == old_url:
-                error_elem = WebDriverWait(driver, 5).until(EC.visibility_of_element_located((By.ID, "error-password")))
-                if error_elem:
-                    print("Password is incorrect")
-                    driver.quit()
-                    sys.exit()
-            else:
-                try:
-                    stopworld = WebDriverWait(driver, 5).until(
-                        EC.visibility_of_element_located((By.XPATH, "//button[contains(@class, 'btn-error')]"))
-                    )
-                    print("Stop button found — world already running.")
-                    driver.quit()
-                    sys.exit()
-                except Exception as e:
-                    print(f"Neither Start nor Stop button found. Something might be wrong: {e}")
-                    driver.quit()
-                    exit()
-        except Exception as inner_exc:
-            print(f"Unexpected error during start/stop button checks: {inner_exc}")
-            print("After waiting for start/stop:\n"+driver.current_url)
-            driver.quit()
-            sys.exit()
-    # Now ensure it’s clickable
-    driver.execute_script("arguments[0].scrollIntoView(true);", startworld)
-    driver.execute_script("arguments[0].click();", startworld)
-    print("Clicked start")
-    time.sleep(2)
-
-except Exception as e:
-    print(f"Error occurred(start): {e}")
-
-
-
-#---------------------------
-''' #--- Jasper removed this feature now (only the start success alert maybe)
-    #--- Uncomment to view any error alert if ur workflow doesnt work
-try:
-    # Wait for the alert div to appear
-    alert_div = WebDriverWait(driver, 20).until(
-        EC.presence_of_element_located((By.XPATH, "//div[@role='alert']/div[2]"))
-    )
-    
-    # Extract the text
-    alert_text = alert_div.text
-    print(f"{alert_text}")
-
-except Exception as e:
-    print(f"Error while fetching alert text: {e}")
-
-#---------------------------
-# Handle alert if present
-try:
-    alert = WebDriverWait(driver, 5).until(EC.alert_is_present())
-    alert_text = alert.text
-    print(f"Alert text: {alert_text}")
-    alert.accept()  # Accept the alert
-except Exception:
-    print("No alert found.")
-    
-# Check browser logs to see if any errors are happening
-for entry in driver.get_log('browser'):
-    print(entry)
-'''
-driver.quit()
+if __name__ == "__main__":
+    main()
